@@ -1,0 +1,56 @@
+name: Update NFL Stats
+
+on:
+  schedule:
+    # Tuesdays 09:00 UTC — after Monday Night Football and nflverse's overnight refresh
+    - cron: "0 9 * * 2"
+  workflow_dispatch:
+    inputs:
+      seasons:
+        description: "Comma-separated seasons (blank = current + 2 prior)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-stats
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build data/stats.json
+        env:
+          SEASONS: ${{ github.event.inputs.seasons }}
+        run: python fetch_stats.py
+
+      - name: Validate JSON
+        run: python -c "import json; d=json.load(open('data/stats.json')); assert d['seasons'], 'empty'; print('seasons:', list(d['seasons']))"
+
+      - name: Commit & push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/stats.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore(data): weekly stats refresh $(date -u +'%Y-%m-%d')"
+            git push
+          fi
